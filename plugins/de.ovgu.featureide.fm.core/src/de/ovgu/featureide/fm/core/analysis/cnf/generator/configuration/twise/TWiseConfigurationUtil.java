@@ -416,4 +416,10 @@ class TWiseConfigurationUtil {
 		this.random = random;
 	}
 
+	public void setInitialConfigurations(List<LiteralSet> preConfigs) {
+		for (final LiteralSet config : preConfigs) {
+			newConfiguration(config);
+		}
+	}
+
 }

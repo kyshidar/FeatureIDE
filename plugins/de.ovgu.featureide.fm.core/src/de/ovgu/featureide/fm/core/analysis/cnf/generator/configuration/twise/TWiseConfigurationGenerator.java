@@ -23,8 +23,10 @@ package de.ovgu.featureide.fm.core.analysis.cnf.generator.configuration.twise;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Set;
 
 import de.ovgu.featureide.fm.core.analysis.cnf.CNF;
 import de.ovgu.featureide.fm.core.analysis.cnf.ClauseList;
@@ -140,6 +142,8 @@ public class TWiseConfigurationGenerator extends AConfigurationGenerator impleme
 	private ArrayList<TWiseConfiguration> bestResult = null;
 
 	protected MonitorThread samplingMonitor;
+	private static List<LiteralSet> preConfigs;
+	private static boolean initialized = false;
 
 	public TWiseConfigurationGenerator(CNF cnf, int t) {
 		this(cnf, convertLiterals(cnf.getVariables().getLiterals()), t, Integer.MAX_VALUE);
@@ -149,8 +153,9 @@ public class TWiseConfigurationGenerator extends AConfigurationGenerator impleme
 		this(cnf, convertLiterals(cnf.getVariables().getLiterals()), t, maxSampleSize);
 	}
 
-	public TWiseConfigurationGenerator(CNF cnf, List<List<ClauseList>> nodes, int t) {
+	public TWiseConfigurationGenerator(CNF cnf, List<List<ClauseList>> nodes, int t, List<LiteralSet> preConfigs) {
 		this(cnf, nodes, t, Integer.MAX_VALUE);
+		TWiseConfigurationGenerator.preConfigs = preConfigs;
 	}
 
 	public TWiseConfigurationGenerator(CNF cnf, List<List<ClauseList>> nodes, int t, int maxSampleSize) {
@@ -159,19 +164,31 @@ public class TWiseConfigurationGenerator extends AConfigurationGenerator impleme
 		this.nodes = nodes;
 	}
 
-	private void init() {
+	public TWiseConfigurationGenerator(CNF cnf, List<List<ClauseList>> nodes, int[][] mapping, List<LiteralSet> preConfigs) {
+		super(cnf, Integer.MAX_VALUE);
+		t = 2;
+		this.nodes = nodes;
+		TWiseConfigurationGenerator.preConfigs = preConfigs;
+	}
+
+	public void init() {
 		final CNF cnf = solver.getSatInstance();
 		if (cnf.getClauses().isEmpty()) {
 			util = new TWiseConfigurationUtil(cnf, null);
 		} else {
 			util = new TWiseConfigurationUtil(cnf, solver);
 		}
+
 		util.setMaxSampleSize(maxSampleSize);
 		util.setRandom(getRandom());
 
 		util.computeRandomSample();
 		if (!util.getCnf().getClauses().isEmpty()) {
 			util.computeMIG();
+		}
+
+		if ((preConfigs != null) || (preConfigs.size() != 0)) {
+			util.setInitialConfigurations(preConfigs);
 		}
 
 		// TODO Variation Point: Sorting Nodes
@@ -181,11 +198,14 @@ public class TWiseConfigurationGenerator extends AConfigurationGenerator impleme
 
 		solver.useSolutionList(0);
 		solver.setSelectionStrategy(SelectionStrategy.ORG);
+		initialized = true;
 	}
 
 	@Override
 	protected void generate(IMonitor<List<LiteralSet>> monitor) throws Exception {
-		init();
+		if (!initialized) {
+			init();
+		}
 
 		phaseCount = 0;
 
@@ -337,6 +357,47 @@ public class TWiseConfigurationGenerator extends AConfigurationGenerator impleme
 
 	public void setIterations(int iterations) {
 		this.iterations = iterations;
+	}
+
+	public List<LiteralSet> getCompleteConfigurations() {
+		final List<LiteralSet> res = new ArrayList<>();
+		util.getCompleteSolutionList().stream().forEach(config -> {
+			res.add(config.getCompleteSolution());
+		});
+		return res;
+	}
+
+	/**
+	 * @param config
+	 * @return
+	 */
+	public Set<String> getCoveredInteractions(LiteralSet config) {
+
+		final Set<String> coveredInteractions = new HashSet<>();
+		final ICombinationSupplier<ClauseList> it;
+		final List<List<PresenceCondition>> groupedPresenceConditions = presenceConditionManager.getGroupedPresenceConditions();
+		if (groupedPresenceConditions.size() == 1) {
+			it = new SingleIterator(t, util.getCnf().getVariables().size(), groupedPresenceConditions.get(0));
+		} else {
+			it = new MergeIterator3(t, util.getCnf().getVariables().size(), groupedPresenceConditions);
+		}
+
+		ClauseList combinedCondition = it.get();
+		while (combinedCondition != null) {
+
+			if (combinedCondition.size() > 0) {
+				final LiteralSet set = combinedCondition.get(0);
+
+				if (config.containsAll(set)) {
+					set.setOrder(de.ovgu.featureide.fm.core.analysis.cnf.LiteralSet.Order.NATURAL);
+					coveredInteractions.add(set.toString());
+				}
+			}
+
+			combinedCondition = it.get();
+		}
+
+		return coveredInteractions;
 	}
 
 }
