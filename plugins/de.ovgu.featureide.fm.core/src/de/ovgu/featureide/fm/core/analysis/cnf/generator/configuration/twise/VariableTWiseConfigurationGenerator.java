@@ -1,5 +1,5 @@
 /* FeatureIDE - A Framework for Feature-Oriented Software Development
- * Copyright (C) 2005-2019  FeatureIDE team, University of Magdeburg, Germany
+ * Copyright (C) 2005-2020  FeatureIDE team, University of Magdeburg, Germany
  *
  * This file is part of FeatureIDE.
  *
@@ -23,10 +23,13 @@ package de.ovgu.featureide.fm.core.analysis.cnf.generator.configuration.twise;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import de.ovgu.featureide.fm.core.analysis.cnf.CNF;
 import de.ovgu.featureide.fm.core.analysis.cnf.ClauseList;
@@ -35,18 +38,18 @@ import de.ovgu.featureide.fm.core.analysis.cnf.generator.configuration.AConfigur
 import de.ovgu.featureide.fm.core.analysis.cnf.generator.configuration.ITWiseConfigurationGenerator;
 import de.ovgu.featureide.fm.core.analysis.cnf.generator.configuration.twise.ICoverStrategy.CombinationStatus;
 import de.ovgu.featureide.fm.core.analysis.cnf.generator.configuration.twise.iterator.ICombinationSupplier;
-import de.ovgu.featureide.fm.core.analysis.cnf.generator.configuration.twise.iterator.MergeIterator3;
-import de.ovgu.featureide.fm.core.analysis.cnf.generator.configuration.twise.iterator.SingleIterator;
+import de.ovgu.featureide.fm.core.analysis.cnf.generator.configuration.twise.iterator.VariableTSingleIterator;
 import de.ovgu.featureide.fm.core.analysis.cnf.solver.ISatSolver.SelectionStrategy;
 import de.ovgu.featureide.fm.core.job.monitor.IMonitor;
 import de.ovgu.featureide.fm.core.job.monitor.MonitorThread;
 
 /**
- * Generates configurations for a given propositional formula such that t-wise feature coverage is achieved.
+ * Variation of the {@link TWiseConfigurationGenerator} by Sebastian Krieter. Allows the usage of a matrix to compute different t-values for different parts of
+ * an feature model.
  *
- * @author Sebastian Krieter
+ * @author Karl Stoermer
  */
-public class TWiseConfigurationGenerator extends AConfigurationGenerator implements ITWiseConfigurationGenerator {
+public class VariableTWiseConfigurationGenerator extends AConfigurationGenerator implements ITWiseConfigurationGenerator {
 
 	private final class SamplingMonitor implements Runnable {
 
@@ -126,14 +129,17 @@ public class TWiseConfigurationGenerator extends AConfigurationGenerator impleme
 	}
 
 	// TODO Variation Point: Iterations of removing low-contributing Configurations
-	private int iterations = 5;
+	private int iterations = 3;
 
 	protected TWiseConfigurationUtil util;
-	protected TWiseCombiner combiner;
+//	protected TWiseCombiner combiner;
 
-	protected final int t;
 	protected final List<List<ClauseList>> nodes;
+	protected final Map<List<List<ClauseList>>, Integer> mappedNodes;
 	protected PresenceConditionManager presenceConditionManager;
+	protected Map<PresenceConditionManager, Integer> groupPresenceConditionManagers;
+	protected final Map<List<PresenceCondition>, Integer> mappedPresenceCondition;
+	protected final List<Map.Entry<List<PresenceCondition>, Integer>> listedMappedPresenceCondition;
 
 	protected long numberOfCombinations, count, coveredCount, invalidCount;
 	protected int phaseCount;
@@ -145,30 +151,14 @@ public class TWiseConfigurationGenerator extends AConfigurationGenerator impleme
 	private static List<LiteralSet> preConfigs;
 	private static boolean initialized = false;
 
-	public TWiseConfigurationGenerator(CNF cnf, int t) {
-		this(cnf, convertLiterals(cnf.getVariables().getLiterals()), t, Integer.MAX_VALUE);
-	}
-
-	public TWiseConfigurationGenerator(CNF cnf, int t, int maxSampleSize) {
-		this(cnf, convertLiterals(cnf.getVariables().getLiterals()), t, maxSampleSize);
-	}
-
-	public TWiseConfigurationGenerator(CNF cnf, List<List<ClauseList>> nodes, int t, List<LiteralSet> preConfigs) {
-		this(cnf, nodes, t, Integer.MAX_VALUE);
-		TWiseConfigurationGenerator.preConfigs = preConfigs;
-	}
-
-	public TWiseConfigurationGenerator(CNF cnf, List<List<ClauseList>> nodes, int t, int maxSampleSize) {
-		super(cnf, maxSampleSize);
-		this.t = t;
-		this.nodes = nodes;
-	}
-
-	public TWiseConfigurationGenerator(CNF cnf, List<List<ClauseList>> nodes, int[][] mapping, List<LiteralSet> preConfigs) {
+	public VariableTWiseConfigurationGenerator(CNF cnf, List<List<ClauseList>> nodes, Map<List<List<ClauseList>>, Integer> mappedNodes,
+			List<LiteralSet> preConfigs) {
 		super(cnf, Integer.MAX_VALUE);
-		t = 2;
+		this.mappedNodes = mappedNodes;
+		mappedPresenceCondition = new HashMap<>();
+		listedMappedPresenceCondition = new ArrayList<>();
 		this.nodes = nodes;
-		TWiseConfigurationGenerator.preConfigs = preConfigs;
+		VariableTWiseConfigurationGenerator.preConfigs = preConfigs;
 	}
 
 	public void init() {
@@ -191,10 +181,12 @@ public class TWiseConfigurationGenerator extends AConfigurationGenerator impleme
 			util.setInitialConfigurations(preConfigs);
 		}
 
-		// TODO Variation Point: Sorting Nodes
-		presenceConditionManager = new PresenceConditionManager(util, nodes);
-		// TODO Variation Point: Building Combinations
-		combiner = new TWiseCombiner(cnf.getVariables().size());
+//		groupPresenceConditionManagers.put(new PresenceConditionManager(util, nodes), null);
+		mappedNodes.entrySet().stream().forEach(entry -> {
+			final PresenceConditionManager pcm = new PresenceConditionManager(util, entry.getKey());
+			mappedPresenceCondition.put(pcm.getGroupedPresenceConditions().get(0), entry.getValue());
+		});
+		listedMappedPresenceCondition.addAll(mappedPresenceCondition.entrySet().stream().collect(Collectors.toList()));
 
 		solver.useSolutionList(0);
 		solver.setSelectionStrategy(SelectionStrategy.ORG);
@@ -210,21 +202,40 @@ public class TWiseConfigurationGenerator extends AConfigurationGenerator impleme
 		phaseCount = 0;
 
 		for (int i = 0; i < iterations; i++) {
-			trimConfigurations();
+			trimConfigurationsVT();
 			buildCombinations();
 		}
 
 		bestResult.forEach(configuration -> addResult(configuration.getCompleteSolution()));
 	}
 
-	private void trimConfigurations() {
+	// ____________________________________________________________________
+	// adjusted for variable t
+	private void trimConfigurationsVT() {
 		if (curResult != null) {
-			final TWiseConfigurationStatistic statistic = new TWiseConfigurationStatistic();
-			statistic.setT(t);
-			statistic.setFastCalc(true);
-			statistic.calculate(util, curResult, presenceConditionManager.getGroupedPresenceConditions());
 
-			final double[] normConfigValues = statistic.getConfigValues2();
+			final VariableTWiseConfigurationStatistic statistic = new VariableTWiseConfigurationStatistic();
+			final List<double[]> normConfigValuesList = new ArrayList<>();
+
+			for (final Map.Entry<List<PresenceCondition>, Integer> entry : listedMappedPresenceCondition) {
+				final List<List<PresenceCondition>> gPC = new ArrayList<>();
+				gPC.add(entry.getKey());
+				statistic.setT(entry.getValue());
+
+				statistic.calculate(util, curResult, gPC);
+				final double[] normConfigValues = statistic.getConfigValues2();
+				normConfigValuesList.add(normConfigValues);
+			}
+
+			final double[] normConfigValues = new double[normConfigValuesList.get(0).length];
+			for (int i = 0; i < normConfigValues.length; i++) {
+				double td = 0;
+				for (final double[] arr : normConfigValuesList) {
+					td += arr[i];
+				}
+				normConfigValues[i] = td;
+			}
+
 			double mean = 0;
 			for (final double d : normConfigValues) {
 				mean += d;
@@ -257,21 +268,17 @@ public class TWiseConfigurationGenerator extends AConfigurationGenerator impleme
 	}
 
 	private void buildCombinations() {
-		// TODO Variation Point: Cover Strategies
 		final List<? extends ICoverStrategy> phaseList = Arrays.asList(//
 				new CoverAll(util) //
 		);
 
-		// TODO Variation Point: Combination order
 		final ICombinationSupplier<ClauseList> it;
-		presenceConditionManager.shuffleSort(getRandom());
-		final List<List<PresenceCondition>> groupedPresenceConditions = presenceConditionManager.getGroupedPresenceConditions();
-		if (groupedPresenceConditions.size() == 1) {
-			// TODO: Changes to Iterator
-			it = new SingleIterator(t, util.getCnf().getVariables().size(), groupedPresenceConditions.get(0));
+		if (mappedPresenceCondition.size() > 0) {
+			it = new VariableTSingleIterator(util.getCnf().getVariables().size(), listedMappedPresenceCondition);
 		} else {
-			it = new MergeIterator3(t, util.getCnf().getVariables().size(), groupedPresenceConditions);
+			it = null;
 		}
+
 		numberOfCombinations = it.size();
 		if (numberOfCombinations == 0) {
 			final LiteralSet[] solverSolutions = util.getSolverSolutions();
@@ -382,12 +389,18 @@ public class TWiseConfigurationGenerator extends AConfigurationGenerator impleme
 	public Set<String> getCoveredInteractions(LiteralSet config) {
 
 		final Set<String> coveredInteractions = new HashSet<>();
+//		final ICombinationSupplier<ClauseList> it;
+//		final List<List<PresenceCondition>> groupedPresenceConditions = presenceConditionManager.getGroupedPresenceConditions();
+//		if (groupedPresenceConditions.size() == 1) {
+//			it = new VariableTSingleIterator(util.getCnf().getVariables().size(), mappedPresenceCondition);
+//		} else {
+//			it = null;
+//		}
 		final ICombinationSupplier<ClauseList> it;
-		final List<List<PresenceCondition>> groupedPresenceConditions = presenceConditionManager.getGroupedPresenceConditions();
-		if (groupedPresenceConditions.size() == 1) {
-			it = new SingleIterator(t, util.getCnf().getVariables().size(), groupedPresenceConditions.get(0));
+		if (mappedPresenceCondition.size() > 0) {
+			it = new VariableTSingleIterator(util.getCnf().getVariables().size(), listedMappedPresenceCondition);
 		} else {
-			it = new MergeIterator3(t, util.getCnf().getVariables().size(), groupedPresenceConditions);
+			it = null;
 		}
 
 		ClauseList combinedCondition = it.get();

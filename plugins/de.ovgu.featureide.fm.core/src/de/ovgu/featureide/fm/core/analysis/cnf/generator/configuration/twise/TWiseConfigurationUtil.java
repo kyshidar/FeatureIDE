@@ -69,6 +69,7 @@ class TWiseConfigurationUtil {
 
 	private final List<TWiseConfiguration> incompleteSolutionList = new LinkedList<>();
 	private final List<TWiseConfiguration> completeSolutionList = new ArrayList<>();
+	private final List<TWiseConfiguration> givenSolutionList = new ArrayList<>();
 
 	protected final CNF cnf;
 	protected final ISatSolver localSolver;
@@ -397,6 +398,10 @@ class TWiseConfigurationUtil {
 		return completeSolutionList;
 	}
 
+	public List<TWiseConfiguration> getGivenSolutionList() {
+		return givenSolutionList;
+	}
+
 	public List<TWiseConfiguration> getResultList() {
 		final ArrayList<TWiseConfiguration> resultList = new ArrayList<>(completeSolutionList.size() + incompleteSolutionList.size());
 		resultList.addAll(incompleteSolutionList);
@@ -420,6 +425,7 @@ class TWiseConfigurationUtil {
 		for (final LiteralSet config : preConfigs) {
 			newConfiguration(config);
 		}
+		givenSolutionList.addAll(List.copyOf(completeSolutionList));
 	}
 
 }
