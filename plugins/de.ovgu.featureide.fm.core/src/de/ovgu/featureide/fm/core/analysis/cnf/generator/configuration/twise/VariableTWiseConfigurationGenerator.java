@@ -39,6 +39,7 @@ import de.ovgu.featureide.fm.core.analysis.cnf.generator.configuration.ITWiseCon
 import de.ovgu.featureide.fm.core.analysis.cnf.generator.configuration.twise.ICoverStrategy.CombinationStatus;
 import de.ovgu.featureide.fm.core.analysis.cnf.generator.configuration.twise.iterator.ICombinationSupplier;
 import de.ovgu.featureide.fm.core.analysis.cnf.generator.configuration.twise.iterator.VariableTSingleIterator;
+import de.ovgu.featureide.fm.core.analysis.cnf.generator.configuration.twise.iterator.VariableTSortingOrder;
 import de.ovgu.featureide.fm.core.analysis.cnf.solver.ISatSolver.SelectionStrategy;
 import de.ovgu.featureide.fm.core.job.monitor.IMonitor;
 import de.ovgu.featureide.fm.core.job.monitor.MonitorThread;
@@ -150,6 +151,7 @@ public class VariableTWiseConfigurationGenerator extends AConfigurationGenerator
 	protected MonitorThread samplingMonitor;
 	private static List<LiteralSet> preConfigs;
 	private static boolean initialized = false;
+	private VariableTSortingOrder order;
 
 	public VariableTWiseConfigurationGenerator(CNF cnf, List<List<ClauseList>> nodes, Map<List<List<ClauseList>>, Integer> mappedNodes,
 			List<LiteralSet> preConfigs) {
@@ -159,6 +161,7 @@ public class VariableTWiseConfigurationGenerator extends AConfigurationGenerator
 		listedMappedPresenceCondition = new ArrayList<>();
 		this.nodes = nodes;
 		VariableTWiseConfigurationGenerator.preConfigs = preConfigs;
+		order = VariableTSortingOrder.UNORDERED;
 	}
 
 	public void init() {
@@ -274,7 +277,7 @@ public class VariableTWiseConfigurationGenerator extends AConfigurationGenerator
 
 		final ICombinationSupplier<ClauseList> it;
 		if (mappedPresenceCondition.size() > 0) {
-			it = new VariableTSingleIterator(util.getCnf().getVariables().size(), listedMappedPresenceCondition);
+			it = new VariableTSingleIterator(util.getCnf().getVariables().size(), listedMappedPresenceCondition, order);
 		} else {
 			it = null;
 		}
@@ -382,6 +385,14 @@ public class VariableTWiseConfigurationGenerator extends AConfigurationGenerator
 		return res;
 	}
 
+	public void setOrdering(VariableTSortingOrder newOrder) {
+		order = newOrder;
+	}
+
+	public VariableTSortingOrder getOrdering() {
+		return order;
+	}
+
 	/**
 	 * @param config
 	 * @return
@@ -389,36 +400,28 @@ public class VariableTWiseConfigurationGenerator extends AConfigurationGenerator
 	public Set<String> getCoveredInteractions(LiteralSet config) {
 
 		final Set<String> coveredInteractions = new HashSet<>();
-//		final ICombinationSupplier<ClauseList> it;
-//		final List<List<PresenceCondition>> groupedPresenceConditions = presenceConditionManager.getGroupedPresenceConditions();
-//		if (groupedPresenceConditions.size() == 1) {
-//			it = new VariableTSingleIterator(util.getCnf().getVariables().size(), mappedPresenceCondition);
-//		} else {
-//			it = null;
-//		}
 		final ICombinationSupplier<ClauseList> it;
 		if (mappedPresenceCondition.size() > 0) {
-			it = new VariableTSingleIterator(util.getCnf().getVariables().size(), listedMappedPresenceCondition);
-		} else {
-			it = null;
-		}
+			it = new VariableTSingleIterator(util.getCnf().getVariables().size(), listedMappedPresenceCondition, order);
+			ClauseList combinedCondition = it.get();
+			while (combinedCondition != null) {
 
-		ClauseList combinedCondition = it.get();
-		while (combinedCondition != null) {
+				if (combinedCondition.size() > 0) {
+					final LiteralSet set = combinedCondition.get(0);
 
-			if (combinedCondition.size() > 0) {
-				final LiteralSet set = combinedCondition.get(0);
-
-				if (config.containsAll(set)) {
-					set.setOrder(de.ovgu.featureide.fm.core.analysis.cnf.LiteralSet.Order.NATURAL);
-					coveredInteractions.add(set.toString());
+					if (config.containsAll(set)) {
+						set.setOrder(de.ovgu.featureide.fm.core.analysis.cnf.LiteralSet.Order.NATURAL);
+						coveredInteractions.add(set.toString());
+					}
 				}
+
+				combinedCondition = it.get();
 			}
 
-			combinedCondition = it.get();
+			return coveredInteractions;
+		} else {
+			return null;
 		}
-
-		return coveredInteractions;
 	}
 
 }

@@ -44,10 +44,18 @@ public class VariableTSingleIterator implements ICombinationSupplier<ClauseList>
 	private PresenceCondition[] nextCombination;
 	private int i;
 
-	public VariableTSingleIterator(int n, List<Map.Entry<List<PresenceCondition>, Integer>> listedMappedPresenceCondition) {
+	public VariableTSingleIterator(int n, List<Map.Entry<List<PresenceCondition>, Integer>> listedMappedPresenceCondition, VariableTSortingOrder order) {
 		mappedPresenceConditions = new ArrayList<>();
 		mappedPresenceConditions.addAll(listedMappedPresenceCondition);
-		Collections.sort(mappedPresenceConditions, (a, b) -> a.getValue() > b.getValue() ? -1 : a.getValue() == b.getValue() ? 0 : 1);
+		switch (order) {
+		case UNORDERED:
+			break;
+		case ASC:
+			Collections.sort(mappedPresenceConditions, (a, b) -> a.getValue() < b.getValue() ? -1 : a.getValue() == b.getValue() ? 0 : 1);
+			break;
+		case DESC:
+			Collections.sort(mappedPresenceConditions, (a, b) -> a.getValue() > b.getValue() ? -1 : a.getValue() == b.getValue() ? 0 : 1);
+		}
 
 		mappedSuppliers = new ArrayList<>();
 		i = 0;
